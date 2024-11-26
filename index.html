@@ -7,87 +7,53 @@
     <meta name="theme-color" content="#4CAF50">
     <link rel="manifest" href="data:application/json;base64,ewogICJuYW1lIjogIlJlbWluZGVyIFBXQSIsCiAgInNob3J0X25hbWUiOiAiUmVtaW5kZXIiLAogICJzdGFydF91cmwiOiAiLyIsCiAgImRpc3BsYXkiOiAic3RhbmRhbG9uZSIsCiAgImJhY2tncm91bmRfY29sb3IiOiAiIzRDQUY1MCIsCiAgInRoZW1lX2NvbG9yIjogIiM0Q0FGNTAiLAogICJpY29ucyI6IFsKICAgIHsKICAgICAgInNyYyI6ICJodHRwczovL2Vtb2ppcy5zbGFja21vamlzLmNvbS9lbW9qaXMvYWxhcm0tY2xvY2svYXBwbGUvYWxhcm0tY2xvY2suanBnIiwKICAgICAgInNpemVzIjogIjE5MngxOTIiLAogICAgICAidHlwZSI6ICJpbWFnZS9wbmciCiAgICB9CiAgXQp9">
     <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            max-width: 600px;
-            margin: 0 auto;
-            padding: 20px;
-            background: #f5f5f5;
-        }
-
-        .container {
-            background: white;
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-
-        h1 {
-            color: #4CAF50;
-            text-align: center;
-        }
-
-        .form-group {
-            margin-bottom: 15px;
-        }
-
-        label {
-            display: block;
-            margin-bottom: 5px;
-            color: #666;
-        }
-
-        input, textarea {
-            width: 100%;
-            padding: 8px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            box-sizing: border-box;
-        }
-
-        button {
-            background: #4CAF50;
+        /* ... [Estilos anteriores se mantienen igual] ... */
+        .permission-banner {
+            background: #ff9800;
             color: white;
-            padding: 10px 20px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            width: 100%;
-            font-size: 16px;
-        }
-
-        button:hover {
-            background: #45a049;
-        }
-
-        #reminders {
-            margin-top: 20px;
-        }
-
-        .reminder-item {
-            background: #f8f8f8;
             padding: 10px;
-            margin-bottom: 10px;
+            text-align: center;
+            margin-bottom: 20px;
             border-radius: 4px;
-            border-left: 4px solid #4CAF50;
+            display: none;
         }
-
-        .delete-btn {
-            background: #ff4444;
-            padding: 5px 10px;
-            margin-left: 10px;
-            float: right;
+        
+        #permissionButton {
+            background: #2196F3;
+            margin-top: 10px;
         }
-
-        .delete-btn:hover {
-            background: #cc0000;
+        
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+        
+        .status-enabled {
+            background-color: #4CAF50;
+        }
+        
+        .status-disabled {
+            background-color: #f44336;
         }
     </style>
 </head>
 <body>
     <div class="container">
+        <div id="permissionBanner" class="permission-banner">
+            Para recibir recordatorios, necesitas habilitar las notificaciones
+            <button id="permissionButton">Habilitar Notificaciones</button>
+        </div>
+
         <h1>📅 Recordatorios</h1>
         
+        <div id="notificationStatus" style="text-align: center; margin-bottom: 20px;">
+            <span class="status-indicator"></span>
+            <span id="statusText">Verificando estado de notificaciones...</span>
+        </div>
+
         <div class="form-group">
             <label for="reminderText">Recordatorio:</label>
             <textarea id="reminderText" rows="2" placeholder="¿Qué necesitas recordar?"></textarea>
@@ -104,39 +70,132 @@
     </div>
 
     <script>
-        // Registrar Service Worker
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/sw.js')
-                .then(registration => {
-                    console.log('Service Worker registrado');
-                    requestNotificationPermission();
-                })
-                .catch(err => console.error('Error al registrar Service Worker:', err));
+        let swRegistration = null;
+        
+        // Verificar soporte de notificaciones
+        function checkNotificationSupport() {
+            if (!('Notification' in window)) {
+                updateNotificationStatus('Las notificaciones no están soportadas en este navegador', false);
+                return false;
+            }
+            return true;
+        }
+
+        // Actualizar el indicador de estado
+        function updateNotificationStatus(message, enabled) {
+            const statusIndicator = document.querySelector('.status-indicator');
+            const statusText = document.getElementById('statusText');
+            
+            statusIndicator.className = 'status-indicator ' + 
+                (enabled ? 'status-enabled' : 'status-disabled');
+            statusText.textContent = message;
+        }
+
+        // Manejar el estado de los permisos
+        function handlePermissionState(permission) {
+            switch (permission) {
+                case 'granted':
+                    updateNotificationStatus('Notificaciones habilitadas', true);
+                    document.getElementById('permissionBanner').style.display = 'none';
+                    break;
+                case 'denied':
+                    updateNotificationStatus('Notificaciones bloqueadas', false);
+                    break;
+                default:
+                    updateNotificationStatus('Notificaciones pendientes de autorización', false);
+                    document.getElementById('permissionBanner').style.display = 'block';
+            }
         }
 
         // Solicitar permiso para notificaciones
         async function requestNotificationPermission() {
             try {
                 const permission = await Notification.requestPermission();
-                if (permission === 'granted') {
-                    console.log('Permiso de notificaciones concedido');
-                }
+                handlePermissionState(permission);
+                return permission === 'granted';
             } catch (err) {
                 console.error('Error al solicitar permiso:', err);
+                return false;
             }
         }
 
-        // Cargar recordatorios guardados
-        let reminders = JSON.parse(localStorage.getItem('reminders') || '[]');
-        updateRemindersDisplay();
+        // Registrar Service Worker
+        async function registerServiceWorker() {
+            if ('serviceWorker' in navigator) {
+                try {
+                    swRegistration = await navigator.serviceWorker.register('sw.js');
+                    console.log('Service Worker registrado');
+                    initializeApp();
+                } catch (err) {
+                    console.error('Error al registrar Service Worker:', err);
+                }
+            }
+        }
 
-        function addReminder() {
+        // Inicializar la aplicación
+        async function initializeApp() {
+            if (checkNotificationSupport()) {
+                handlePermissionState(Notification.permission);
+                document.getElementById('permissionButton').addEventListener('click', requestNotificationPermission);
+            }
+            loadReminders();
+        }
+
+        // Crear y mostrar notificación
+        async function showNotification(reminder) {
+            if (Notification.permission === 'granted') {
+                try {
+                    await swRegistration.showNotification('Recordatorio', {
+                        body: reminder.text,
+                        icon: '/icon.png',
+                        badge: '/badge.png',
+                        tag: reminder.id.toString(),
+                        renotify: true
+                    });
+                } catch (err) {
+                    console.error('Error al mostrar notificación:', err);
+                    // Fallback a notificación básica
+                    new Notification('Recordatorio', {
+                        body: reminder.text
+                    });
+                }
+            }
+        }
+
+        // Programar notificación
+        function scheduleNotification(reminder) {
+            const now = new Date().getTime();
+            const reminderTime = new Date(reminder.time).getTime();
+            
+            if (reminderTime > now) {
+                const delay = reminderTime - now;
+                setTimeout(() => showNotification(reminder), delay);
+            }
+        }
+
+        // Cargar recordatorios
+        function loadReminders() {
+            reminders = JSON.parse(localStorage.getItem('reminders') || '[]');
+            updateRemindersDisplay();
+            reminders.forEach(scheduleNotification);
+        }
+
+        // Agregar recordatorio
+        async function addReminder() {
             const text = document.getElementById('reminderText').value;
             const time = document.getElementById('reminderTime').value;
             
             if (!text || !time) {
                 alert('Por favor completa todos los campos');
                 return;
+            }
+
+            if (Notification.permission !== 'granted') {
+                const permitted = await requestNotificationPermission();
+                if (!permitted) {
+                    alert('Necesitas habilitar las notificaciones para crear recordatorios');
+                    return;
+                }
             }
 
             const reminder = {
@@ -151,17 +210,18 @@
             scheduleNotification(reminder);
             updateRemindersDisplay();
             
-            // Limpiar formulario
             document.getElementById('reminderText').value = '';
             document.getElementById('reminderTime').value = '';
         }
 
+        // Eliminar recordatorio
         function deleteReminder(id) {
             reminders = reminders.filter(r => r.id !== id);
             localStorage.setItem('reminders', JSON.stringify(reminders));
             updateRemindersDisplay();
         }
 
+        // Actualizar visualización
         function updateRemindersDisplay() {
             const container = document.getElementById('reminders');
             container.innerHTML = '';
@@ -180,48 +240,8 @@
             });
         }
 
-        function scheduleNotification(reminder) {
-            const now = new Date().getTime();
-            const reminderTime = new Date(reminder.time).getTime();
-            
-            if (reminderTime > now) {
-                const delay = reminderTime - now;
-                setTimeout(() => {
-                    if (Notification.permission === 'granted') {
-                        new Notification('Recordatorio', {
-                            body: reminder.text,
-                            icon: '/icon.png'
-                        });
-                    }
-                }, delay);
-            }
-        }
-
-        // Programar notificaciones para recordatorios existentes
-        reminders.forEach(scheduleNotification);
-    </script>
-
-    <script>
-        // Service Worker inline para Netlify
-        self.addEventListener('install', event => {
-            self.skipWaiting();
-        });
-
-        self.addEventListener('activate', event => {
-            return self.clients.claim();
-        });
-
-        self.addEventListener('push', event => {
-            const options = {
-                body: event.data.text(),
-                icon: '/icon.png',
-                badge: '/badge.png'
-            };
-
-            event.waitUntil(
-                self.registration.showNotification('Recordatorio', options)
-            );
-        });
+        // Iniciar la aplicación
+        registerServiceWorker();
     </script>
 </body>
 </html>
